@@ -7,7 +7,7 @@ out of the latest [Protomaps](https://protomaps.com) world build and publishes
 it on the `maps` release. The app downloads
 `https://github.com/mrenzomaggio-boop/survive72-maps/releases/download/maps/<id>.pmtiles`.
 
-`regions.json` is a copy of `ios/SURVIVE72/MapStyle/regions.json` in the app
+`regions.json` (all countries of the world from Natural Earth, big countries also split into states/regions) is a copy of `ios/SURVIVE72/MapStyle/regions.json` in the app
 repository: change both together.
 
 It runs on the 5th of every month and can be started by hand from the Actions
