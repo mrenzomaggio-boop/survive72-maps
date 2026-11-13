@@ -83,8 +83,12 @@ jobs:
             bytes=$(stat -c %s "$file")
             echo "$id: $((bytes / 1000000)) MB"
             if [ "$bytes" -ge 2000000000 ]; then
+              # Skip it but keep going, so one big area does not block the others.
               echo "::error::$id is $bytes bytes, over the 2 GB release file limit. Lower its maxzoom in regions.json."
-              exit 1
+              echo "$id" >> too-big.txt
+              rm -f "$file"
+              echo "::endgroup::"
+              continue
             fi
             gh release upload "$TAG" "$file" --clobber
             jq --arg id "$id" --argjson bytes "$bytes" '. + [{id: $id, bytes: $bytes}]' sizes.json > sizes.tmp && mv sizes.tmp sizes.json
@@ -105,7 +109,12 @@ jobs:
             echo "|---|---:|"
             jq -r '.areas[] | "| \(.id) | \(.bytes / 1000000 | floor) |"' catalog.json
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ -s too-big.txt ]; then
+            echo "Skipped, too big: $(tr '\n' ' ' < too-big.txt)" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           # Only a full run replaces the published catalog.
           if [ -z "${{ github.event.inputs.only }}" ]; then
             gh release upload "$TAG" catalog.json --clobber
           fi
+          # Still mark the run as failed when an area was skipped.
+          [ ! -s too-big.txt ]
