@@ -1,0 +1,111 @@
+name: Build offline map areas
+
+# Cuts each area of regions.json out of the latest Protomaps world build
+# (OpenStreetMap data) and publishes the files on the "maps" release, where the
+# SURVIVE 72 app downloads them:
+# https://github.com/<owner>/survive72-maps/releases/download/maps/<id>.pmtiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Area ids to build, comma separated (empty = all)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 3 5 * *" # 5th of every month, 03:00 UTC
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-maps
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PMTILES_VERSION: "1.28.0"
+      TAG: maps
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pmtiles
+        run: |
+          curl -sSL -o pmtiles.tgz "https://github.com/protomaps/go-pmtiles/releases/download/v${PMTILES_VERSION}/go-pmtiles_${PMTILES_VERSION}_Linux_x86_64.tar.gz"
+          tar xzf pmtiles.tgz pmtiles
+          ./pmtiles version
+
+      - name: Find the latest world build
+        id: source
+        run: |
+          for i in $(seq 0 14); do
+            day=$(date -u -d "-$i day" +%Y%m%d)
+            url="https://build.protomaps.com/${day}.pmtiles"
+            if curl -sfI "$url" > /dev/null; then
+              echo "url=$url" >> "$GITHUB_OUTPUT"
+              echo "day=$day" >> "$GITHUB_OUTPUT"
+              echo "Using $url"
+              exit 0
+            fi
+          done
+          echo "No Protomaps build found in the last 15 days" >&2
+          exit 1
+
+      - name: Make sure the release exists
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --title "Offline map areas" \
+              --notes "Map data © OpenStreetMap contributors, available under the Open Database License (ODbL). Tiles built with Protomaps."
+          fi
+
+      - name: Cut and upload each area
+        env:
+          SOURCE: ${{ steps.source.outputs.url }}
+          ONLY: ${{ github.event.inputs.only }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          echo '[]' > sizes.json
+          jq -c '.regions[]' regions.json | while read -r region; do
+            id=$(jq -r '.id' <<< "$region")
+            if [ -n "${ONLY:-}" ] && [[ ",${ONLY// /}," != *",$id,"* ]]; then
+              continue
+            fi
+            bbox=$(jq -r '.bbox | map(tostring) | join(",")' <<< "$region")
+            maxzoom=$(jq -r '.maxzoom' <<< "$region")
+            file="out/$id.pmtiles"
+            echo "::group::$id bbox=$bbox maxzoom=$maxzoom"
+            ./pmtiles extract "$SOURCE" "$file" --bbox="$bbox" --maxzoom="$maxzoom" --download-threads=8
+            bytes=$(stat -c %s "$file")
+            echo "$id: $((bytes / 1000000)) MB"
+            if [ "$bytes" -ge 2000000000 ]; then
+              echo "::error::$id is $bytes bytes, over the 2 GB release file limit. Lower its maxzoom in regions.json."
+              exit 1
+            fi
+            gh release upload "$TAG" "$file" --clobber
+            jq --arg id "$id" --argjson bytes "$bytes" '. + [{id: $id, bytes: $bytes}]' sizes.json > sizes.tmp && mv sizes.tmp sizes.json
+            rm -f "$file"
+            echo "::endgroup::"
+          done
+
+      - name: Publish sizes
+        env:
+          DAY: ${{ steps.source.outputs.day }}
+        run: |
+          jq --arg day "$DAY" '{source_build: $day, areas: .}' sizes.json > catalog.json
+          cat catalog.json
+          {
+            echo "### Areas built from Protomaps build $DAY"
+            echo
+            echo "| Area | MB |"
+            echo "|---|---:|"
+            jq -r '.areas[] | "| \(.id) | \(.bytes / 1000000 | floor) |"' catalog.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Only a full run replaces the published catalog.
+          if [ -z "${{ github.event.inputs.only }}" ]; then
+            gh release upload "$TAG" catalog.json --clobber
+          fi
