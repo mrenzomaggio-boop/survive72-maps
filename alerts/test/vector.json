@@ -1,0 +1,18 @@
+{
+  "publicKey": "6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw=",
+  "alert": {
+    "id": "meteoalarm:abc",
+    "source": "meteoalarm",
+    "kind": "weather",
+    "country": "IT",
+    "severity": "severe",
+    "title": "Allerta arancione · piogge",
+    "detail": "Città: più di 100 mm…",
+    "area": "Liguria",
+    "link": "https://meteoalarm.org",
+    "issuedAt": 1794826800,
+    "startsAt": 1794855600,
+    "expiresAt": 1794898800,
+    "signature": "qhIco/XCfK3CHcTfbpfc4D1ExVRsNIAEQbSlC9Ik+BvI+zLjC+0VkLHu7twtWk37jEGmh2m3jXzFDCKEi1MJDA=="
+  }
+}
