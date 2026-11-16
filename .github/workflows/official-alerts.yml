@@ -1,0 +1,72 @@
+name: Official alerts
+
+# Every 15 minutes: downloads official alerts (Meteoalarm weather warnings,
+# INGV earthquakes, GDACS disasters), signs each one with the SURVIVE 72 key
+# and publishes them on the "alerts" release, where the app reads them:
+# https://github.com/<owner>/survive72-maps/releases/download/alerts/official-alerts.json
+# Phones that got them pass them on to nearby phones without internet; the
+# signature lets every phone check they really come from here.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "alerts/**"
+      - ".github/workflows/official-alerts.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: official-alerts
+  cancel-in-progress: false
+
+env:
+  TAG: alerts
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests
+        run: node --test alerts/test/*.test.js
+      - name: Read the sources (nothing published)
+        run: node alerts/build.js /tmp/official-alerts.json
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests
+        run: node --test alerts/test/*.test.js
+      - name: Download and sign
+        env:
+          ALERTS_SIGNING_KEY: ${{ secrets.ALERTS_SIGNING_KEY }}
+        run: |
+          if [ -z "$ALERTS_SIGNING_KEY" ]; then
+            echo "::error::The ALERTS_SIGNING_KEY secret is missing"
+            exit 1
+          fi
+          node alerts/build.js official-alerts.json
+      - name: Publish
+        run: |
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" --title "Official alerts" \
+              --notes "Signed official alerts for the SURVIVE 72 app, refreshed every 15 minutes. Sources: Meteoalarm (EUMETNET and the national weather services), INGV, GDACS."
+          fi
+          gh release upload "$TAG" official-alerts.json --clobber
