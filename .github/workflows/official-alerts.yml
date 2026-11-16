@@ -6,6 +6,8 @@ name: Official alerts
 # https://github.com/<owner>/survive72-maps/releases/download/alerts/official-alerts.json
 # Phones that got them pass them on to nearby phones without internet; the
 # signature lets every phone check they really come from here.
+# Every 45 days without commits it commits alerts/keepalive.txt, so GitHub
+# does not pause the schedule.
 
 on:
   schedule:
@@ -70,3 +72,17 @@ jobs:
               --notes "Signed official alerts for the SURVIVE 72 app, refreshed every 15 minutes. Sources: Meteoalarm (EUMETNET and the national weather services), INGV, GDACS."
           fi
           gh release upload "$TAG" official-alerts.json --clobber
+      # GitHub pauses scheduled workflows after 60 days without commits.
+      # A small commit every 45 days keeps the alerts flowing.
+      - name: Keep the schedule alive
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 45 * 24 * 3600 )) ]; then
+            date -u +%Y-%m-%dT%H:%MZ > alerts/keepalive.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+            git add alerts/keepalive.txt
+            git commit -m "Keep the official alerts schedule active"
+            git push
+          fi
